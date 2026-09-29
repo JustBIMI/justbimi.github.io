@@ -1,10 +1,133 @@
 <!DOCTYPE html>
-<html>
+<html lang="de">
 <head>
-    <title>Online-Lernzeitplaner</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Schulplaner</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+:root{--bg:#f5f6fa;--card:#fff;--tx:#1b1e2b;--mut:#6b7185;--ac:#4f6bff;--bd:#e3e6f0;--ok:#22a06b;--bad:#e5484d;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12141c;--card:#1c1f2b;--tx:#eceef6;--mut:#9aa1b9;--bd:#2c3040}}
+:root[data-theme="dark"]{--bg:#12141c;--card:#1c1f2b;--tx:#eceef6;--mut:#9aa1b9;--bd:#2c3040}
+html{scroll-padding-top:env(safe-area-inset-top,0px);font-size:16px}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:1rem/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{display:flex;align-items:center;gap:.75rem;padding:1rem;max-width:900px;margin:auto}
+header img{height:2.6rem;max-width:30%;object-fit:contain;border-radius:8px}
+header h1{font-size:1.3rem;margin:0}
+nav{display:flex;gap:.4rem;padding:0 1rem;max-width:900px;margin:auto;overflow-x:auto}
+nav button{border:0;background:var(--card);color:var(--mut);padding:.55rem 1rem;border-radius:999px;font:inherit;cursor:pointer;white-space:nowrap;border:1px solid var(--bd)}
+nav button.on{background:var(--ac);color:#fff;border-color:var(--ac)}
+main{max-width:900px;margin:auto;padding:1rem}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:16px;padding:1rem;margin-bottom:1rem;box-shadow:0 2px 10px #0000000d}
+h2{font-size:1.1rem;margin:0 0 .75rem}
+input,select,button.b{font:inherit;color:var(--tx);background:var(--bg);border:1px solid var(--bd);border-radius:10px;padding:.5rem .6rem}
+button.b{background:var(--ac);color:#fff;border-color:var(--ac);cursor:pointer}
+button.g{background:transparent;color:var(--mut);border-color:var(--bd)}
+.row{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-bottom:.6rem}
+.row input{flex:1;min-width:8rem}
+.scroll{overflow-x:auto}
+table{border-collapse:separate;border-spacing:4px;width:100%;min-width:560px}
+th{color:var(--mut);font-weight:600;font-size:.85em}
+td input{width:100%;text-align:center;padding:.5rem .2rem;font-size:.9em}
+td.n{color:var(--mut);text-align:center;width:2rem}
+.item{display:flex;align-items:center;gap:.6rem;padding:.6rem 0;border-top:1px solid var(--bd)}
+.item:first-child{border-top:0}
+.item .t{flex:1}.item small{color:var(--mut);display:block}
+.done .t{text-decoration:line-through;opacity:.5}
+.pill{padding:.2rem .6rem;border-radius:999px;background:var(--bg);font-size:.85em;white-space:nowrap}
+.pill.soon{background:var(--bad);color:#fff}
+.msg{color:var(--mut);font-size:.9em;margin:.4rem 0}
+label.s{display:flex;justify-content:space-between;align-items:center;padding:.5rem 0;gap:1rem}
+</style>
 </head>
 <body>
-    <h1>Mein Online-Lernzeitplaner</h1>
-    <p>Hier entsteht bald meine eigene Webseite!</p>
+<header><img id="logo" alt="" hidden><h1 id="sname">Schulplaner</h1></header>
+<nav id="nav"></nav>
+<main id="main"></main>
+<script>
+const DAYS=['Mo','Di','Mi','Do','Fr'],PER=10;
+let S={tt:{},tasks:[],exams:[],set:{theme:'auto',size:'1'}},tab='tt',cfg={name:'',logo:''},isAdmin=false,ui={};
+try{const r=localStorage.getItem('planer_v1');if(r)S=Object.assign(S,JSON.parse(r))}catch(e){}
+tab=S.set.start||'tt';
+const save=()=>{S.ts=Date.now();try{localStorage.setItem('planer_v1',JSON.stringify(S))}catch(e){}push()};
+let cur=null,pt,apw=null,unlocked=false;
+function push(){if(!db||!cur)return;clearTimeout(pt);pt=setTimeout(()=>db.doc('students/'+cur).set({j:JSON.stringify(S)}).catch(()=>{}),800)}
+const subs=()=>[...new Set(Object.values(S.tt).map(v=>String(v||'').split(' · ')[0].trim()).filter(Boolean))];
+const dl=()=>`<datalist id="subj">${subs().map(x=>`<option value="${esc(x)}">`).join('')}</datalist>`;
+const sha=async t=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(t)))].map(b=>b.toString(16).padStart(2,'0')).join('');
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const uid=()=>Math.random().toString(36).slice(2,9);
+function applySet(){const r=document.documentElement;r.style.setProperty('--ac',S.set.ac||'#4f6bff');S.set.theme==='auto'?r.removeAttribute('data-theme'):r.setAttribute('data-theme',S.set.theme);r.style.fontSize=({'0.875':'14px','1':'16px','1.25':'20px'})[S.set.size]||'16px'}
+function head(){const l=document.getElementById('logo');l.hidden=!cfg.logo;if(cfg.logo)l.src=cfg.logo;document.getElementById('sname').textContent=cfg.name||'Schulplaner'}
+function nav(){if(location.hash==='#admin'){document.getElementById('nav').innerHTML='<button data-h="1">← Zur App</button>';document.querySelector('nav button').onclick=()=>{location.hash='';};return}
+if(db&&!cur){document.getElementById('nav').innerHTML='';return}const t=[['tt','Stundenplan'],['hw','Lernzeit'],['ex','Klausuren'],['st','Einstellungen']];document.getElementById('nav').innerHTML=t.map(([k,v])=>`<button class="${tab===k?'on':''}" data-t="${k}">${v}</button>`).join('');
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{tab=b.dataset.t;draw()})}
+function draw(){nav();const m=document.getElementById('main');m.innerHTML=location.hash==='#admin'?vAD():(db&&!cur)?vLogin():({tt:vTT,hw:vHW,ex:vEX,st:vST})[tab]();bind()}
+window.onhashchange=draw;
+function vTT(){let h=`<div class="card"><h2>Stundenplan importieren</h2><div class="row"><input type="file" id="imp" accept="image/*,application/pdf,.csv,.txt"><button class="b" id="impb">Automatisch erkennen</button></div><div class="msg" id="impm">Foto, Screenshot, PDF oder Textdatei. Danach kannst du alles nachbessern.</div></div><div class="card scroll"><h2>Mein Stundenplan</h2><table><tr><th></th>${DAYS.map(d=>`<th>${d}</th>`).join('')}</tr>`;
+for(let p=1;p<=PER;p++){h+=`<tr><td class="n">${p}</td>`+DAYS.map((d,i)=>`<td><input data-c="${i}_${p}" value="${esc(S.tt[i+'_'+p])}"></td>`).join('')+'</tr>'}
+return h+'</table></div>'}
+function vHW(){const L=[...S.tasks].sort((a,b)=>(a.done-b.done)||(a.due||'9').localeCompare(b.due||'9'));
+return `<div class="card"><h2>Neue Lernzeit-Aufgabe</h2><div class="row"><input id="ht" placeholder="Aufgabe"><input id="hs" list="subj" placeholder="Fach wählen" style="max-width:10rem">${dl()}<input id="hd" type="date" style="flex:0"><button class="b" id="ha">Hinzufügen</button></div></div><div class="card"><h2>Aufgaben</h2>${L.map(t=>`<div class="item ${t.done?'done':''}"><input type="checkbox" data-d="${t.id}" ${t.done?'checked':''}><div class="t">${esc(t.text)}<small>${esc(t.subj)} ${t.due?'· fällig '+new Date(t.due).toLocaleDateString('de-DE'):''}</small></div><button class="b g" data-x="${t.id}">✕</button></div>`).join('')||'<div class="msg">Noch nichts eingetragen.</div>'}</div>`}
+function vEX(){const L=[...S.exams].sort((a,b)=>a.date.localeCompare(b.date));const today=new Date(new Date().toDateString());
+return `<div class="card"><h2>Neue Klausur</h2><div class="row"><input id="es" list="subj" placeholder="Fach wählen">${dl()}<input id="en" placeholder="Themen (optional)"><input id="ed" type="date" style="flex:0"><button class="b" id="ea">Hinzufügen</button></div></div><div class="card"><h2>Klausuren</h2>${L.map(e=>{const d=Math.round((new Date(e.date)-today)/864e5);return `<div class="item"><div class="t">${esc(e.subj)}<small>${new Date(e.date).toLocaleDateString('de-DE')} ${esc(e.note)}</small></div><span class="pill ${d>=0&&d<=7?'soon':''}">${d<0?'vorbei':d===0?'heute':'in '+d+' Tagen'}</span><button class="b g" data-y="${e.id}">✕</button></div>`}).join('')||'<div class="msg">Keine Klausuren eingetragen.</div>'}</div>`}
+function vST(){const o=(v,a,l)=>`<option value="${v}" ${a===v?'selected':''}>${l}</option>`;
+return `<div class="card"><h2>Einstellungen</h2><label class="s">Darstellung<select id="th">${o('auto',S.set.theme,'Automatisch')}${o('light',S.set.theme,'Hell')}${o('dark',S.set.theme,'Dunkel')}</select></label><label class="s">Schriftgröße<select id="sz">${o('0.875',S.set.size,'Klein')}${o('1',S.set.size,'Normal')}${o('1.25',S.set.size,'Groß')}</select></label><label class="s">Akzentfarbe<select id="ac">${o('#4f6bff',S.set.ac||'#4f6bff','Blau')}${o('#22a06b',S.set.ac,'Grün')}${o('#f08a24',S.set.ac,'Orange')}${o('#e0407a',S.set.ac,'Pink')}</select></label><label class="s">Startseite<select id="stt">${o('tt',S.set.start||'tt','Stundenplan')}${o('hw',S.set.start,'Lernzeit')}${o('ex',S.set.start,'Klausuren')}</select></label></div><div class="card"><h2>Sicherung</h2><div class="msg" id="sm">${cur?'Angemeldet als '+esc(cur)+'. Deine Daten werden automatisch gespeichert.':'Automatische Kontospeicherung ist hier nicht verfügbar. Nutze die Sicherungsdatei.'}</div><div class="row"><button class="b" id="bx">Sicherung speichern</button><input type="file" id="bi" accept=".json"><button class="b g" id="bib">Sicherung laden</button></div><div class="msg">Speichere die Datei in iCloud Drive, dann hast du sie überall.</div></div><div class="card"><h2>App</h2><div class="row"><button class="b" id="dlapp">App herunterladen</button>${cur?'<button class="b g" id="lo">Abmelden</button>':''}</div><div class="msg" id="dm">Speichert die App als HTML-Datei. Ohne Cloud läuft sie im lokalen Modus ohne Anmeldung.</div></div>`}
+function vLogin(){return `<div class="card"><h2>Anmelden</h2><div class="row"><input id="lu" placeholder="Benutzername" autocapitalize="none"><input id="lp" type="password" placeholder="Passwort"><button class="b" id="lb">Anmelden</button></div><div class="msg" id="lm">Zugangsdaten bekommst du vom Medienteam deiner Schule.</div></div>`}
+const DEF=()=>({tt:{},tasks:[],exams:[],set:{theme:'auto',size:'1'}});
+async function login(u,p){u=u.trim().toLowerCase();const h=await sha(u+':'+p),a=await db.doc('accounts/'+u).get();if(!a.exists||a.data().h!==h)return false;await enter(u,h);return true}
+async function enter(u,h){cur=u;try{localStorage.setItem('planer_login',JSON.stringify({u,h}))}catch(e){}let d=null;try{const g=await db.doc('students/'+u).get();if(g.exists)d=JSON.parse(g.data().j)}catch(e){}S=Object.assign(DEF(),d||{});tab=S.set.start||'tt';applySet();draw()}
+function logout(){cur=null;try{localStorage.removeItem('planer_login');localStorage.removeItem('planer_v1')}catch(e){}S=DEF();applySet();draw()}
+async function loadAcc(){const el=document.getElementById('accl');try{const q=await db.collection('accounts').get();el.innerHTML=q.docs.map(d=>{const u=esc(d.data().u);return `<div class="item"><div class="t">${u}</div><button class="b g" data-a="${u}">Löschen</button></div>`}).join('')||'<div class="msg">Noch keine Konten.</div>';el.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>delAcc(b.dataset.a))}catch(e){el.textContent='Liste nicht ladbar.'}}
+async function createAcc(){const u=document.getElementById('nu').value.trim().toLowerCase(),p=document.getElementById('np').value,m=document.getElementById('am');if(!/^[a-z0-9._-]{2,30}$/.test(u)||p.length<4){m.textContent='Benutzername (a-z, 0-9, . _ -) und Passwort (mind. 4 Zeichen) nötig.';return}try{await db.doc('accounts/'+u).set({u,h:await sha(u+':'+p)});m.textContent='Konto angelegt.';document.getElementById('nu').value='';document.getElementById('np').value='';loadAcc()}catch(e){m.textContent='Nicht erlaubt.'}}
+async function delAcc(u){try{await db.doc('accounts/'+u).delete();await db.doc('students/'+u).delete().catch(()=>{});loadAcc()}catch(e){}}
+function vAD(){if(!unlocked)return `<div class="card"><h2>Admin-Bereich</h2><div class="row"><input id="ap" type="password" placeholder="${apw===null?'Neues Passwort festlegen':'Passwort'}"><button class="b" id="apb">${apw===null?'Festlegen':'Anmelden'}</button></div><div class="msg" id="am">${apw===null?'Erstes Passwort kann nur ein Bearbeiter der Seite festlegen.':''}</div></div>`;
+return `<div class="card"><h2>Schule</h2><div class="row"><input id="an" placeholder="Schulname" value="${esc(cfg.name)}"><button class="b" id="asv">Speichern</button></div><div class="row"><input type="file" id="al" accept="image/*"><button class="b" id="alb">Logo hochladen</button></div><div class="msg" id="am">Name und Logo sehen alle Schüler.</div></div><div class="card"><h2>Schülerkonten</h2><div class="row"><input id="nu" placeholder="Benutzername" autocapitalize="none"><input id="np" placeholder="Passwort"><button class="b" id="nb">Anlegen</button></div><div id="accl" class="msg">Lädt …</div></div><div class="card"><h2>Passwort ändern</h2><div class="row"><input id="ap" type="password" placeholder="Neues Passwort"><button class="b" id="apc">Ändern</button></div></div>`}
+async function adminLogin(){const m=document.getElementById('am'),v=document.getElementById('ap').value;if(!v)return;const h=await sha(v);
+if(apw===null){if(!isAdmin||!db){m.textContent='Nur Bearbeiter können das Passwort festlegen.';return}try{await db.doc('config/admin').set({h});apw=h;unlocked=true;draw()}catch(e){m.textContent='Speichern nicht erlaubt.'}}
+else if(h===apw){unlocked=true;draw()}else m.textContent='Falsches Passwort.'}
+async function adminChange(){const v=document.getElementById('ap').value,m=document.getElementById('am');if(!v)return;try{const h=await sha(v);await db.doc('config/admin').set({h});apw=h;m.textContent='Passwort geändert.'}catch(e){m.textContent='Nicht erlaubt.'}}
+function bind(){const $=id=>document.getElementById(id);
+document.querySelectorAll('[data-c]').forEach(i=>i.oninput=()=>{S.tt[i.dataset.c]=i.value;save()});
+if($('impb'))$('impb').onclick=doImport;
+if($('ha'))$('ha').onclick=()=>{const t=$('ht').value.trim();if(!t)return;S.tasks.push({id:uid(),text:t,subj:$('hs').value,due:$('hd').value,done:false});save();draw()};
+document.querySelectorAll('[data-d]').forEach(c=>c.onchange=()=>{S.tasks.find(t=>t.id===c.dataset.d).done=c.checked;save();draw()});
+document.querySelectorAll('[data-x]').forEach(b=>b.onclick=()=>{S.tasks=S.tasks.filter(t=>t.id!==b.dataset.x);save();draw()});
+if($('ea'))$('ea').onclick=()=>{if(!$('es').value.trim()||!$('ed').value)return;S.exams.push({id:uid(),subj:$('es').value,date:$('ed').value,note:$('en').value});save();draw()};
+document.querySelectorAll('[data-y]').forEach(b=>b.onclick=()=>{S.exams=S.exams.filter(t=>t.id!==b.dataset.y);save();draw()});
+if($('ac'))$('ac').onchange=e=>{S.set.ac=e.target.value;save();applySet()};
+if($('stt'))$('stt').onchange=e=>{S.set.start=e.target.value;save()};
+if($('bx'))$('bx').onclick=async()=>{try{const d=await claude.use('downloads');await d.save({filename:'schulplaner-sicherung.json',data:JSON.stringify(S)})}catch(e){$('sm').textContent='Speichern nicht möglich.'}};
+if($('bib'))$('bib').onclick=async()=>{const f=$('bi').files[0];if(!f)return;try{S=Object.assign(S,JSON.parse(await f.text()));save();draw();}catch(e){$('sm').textContent='Datei nicht lesbar.'}};
+if($('apb'))$('apb').onclick=adminLogin;
+if($('nb'))$('nb').onclick=createAcc;
+if($('accl'))loadAcc();
+if($('lo'))$('lo').onclick=logout;
+if($('lb'))$('lb').onclick=async()=>{const m=$('lm');m.textContent='…';try{if(!await login($('lu').value,$('lp').value))m.textContent='Benutzername oder Passwort falsch.'}catch(e){m.textContent='Anmeldung nicht möglich.'}};
+if($('dlapp'))$('dlapp').onclick=async()=>{try{const c=document.documentElement.cloneNode(true);c.querySelector('#main').innerHTML='';c.querySelector('#nav').innerHTML='';const d=await claude.use('downloads');await d.save({filename:'schulplaner.html',data:'<!DOCTYPE html>\n'+c.outerHTML})}catch(e){$('dm').textContent='Download nicht möglich.'}};
+if($('apc'))$('apc').onclick=adminChange;
+if($('th'))$('th').onchange=e=>{S.set.theme=e.target.value;save();applySet()};
+if($('sz'))$('sz').onchange=e=>{S.set.size=e.target.value;save();applySet()};
+if($('asv'))$('asv').onclick=()=>saveCfg({name:$('an').value.trim()});
+if($('alb'))$('alb').onclick=uploadLogo}
+async function pdfToBlob(f){pdfjsLib.GlobalWorkerOptions.workerSrc=URL.createObjectURL(new Blob(['importScripts("https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js")'],{type:'text/javascript'}));
+const pdf=await pdfjsLib.getDocument({data:await f.arrayBuffer()}).promise,pg=await pdf.getPage(1),vp=pg.getViewport({scale:2}),c=document.createElement('canvas');c.width=vp.width;c.height=vp.height;await pg.render({canvasContext:c.getContext('2d'),viewport:vp}).promise;return new Promise(r=>c.toBlob(r,'image/png'))}
+async function doImport(){const m=document.getElementById('impm'),f=document.getElementById('imp').files[0];if(!f){m.textContent='Bitte zuerst eine Datei wählen.';return}
+m.textContent='Wird erkannt … das kann bis zu einer Minute dauern.';
+try{const sample=await claude.use('sample');if(!sample){m.textContent='Erkennung hier nicht verfügbar. Öffne den Link direkt in claude.ai oder trage manuell ein.';return}
+const lim=await sample.limits();let prompt='Das ist ein Schulstundenplan. Lies alle Unterrichtsstunden aus. Antworte NUR mit JSON ohne weiteren Text: {"cells":[{"d":0,"p":1,"s":"Mathe","r":"R204"}]}. d = Wochentag (Mo=0 bis Fr=4), p = Stundennummer (1-10, von oben gezählt, Pausen überspringen), s = Fach, r = Raum falls vorhanden. Leere Felder weglassen.',opt={};
+if(/^image\//.test(f.type)){if(!lim.images){m.textContent='Bilderkennung ist in dieser Ansicht nicht verfügbar. Öffne den Link in claude.ai.';return}opt.images=f}else if(f.type==='application/pdf'){if(!lim.images){m.textContent='PDF-Erkennung nicht verfügbar. Nutze einen Screenshot.';return}opt.images=await pdfToBlob(f)}else prompt+='\n\nDaten:\n'+(await f.text()).slice(0,20000);
+const res=await sample(prompt,opt),mt=res.text.match(/[\[{][\s\S]*[\]}]/),r=JSON.parse(mt[0]),cells=Array.isArray(r)?r:(r.cells||[]);let n=0;
+cells.forEach(c=>{if(c.d>=0&&c.d<5&&c.p>=1&&c.p<=PER&&c.s){S.tt[c.d+'_'+c.p]=c.s+(c.r?' · '+c.r:'');n++}});save();draw();document.getElementById('impm').textContent=n+' Felder übernommen. Bitte kurz prüfen.'}
+catch(e){m.textContent='Fehler: '+(e.code||'')+' '+(e.message||'Antwort nicht lesbar')+'. Trage ggf. manuell ein.'}}
+let db=null;
+async function saveCfg(p){const m=document.getElementById('am');try{cfg={...cfg,...p};await db.doc('config/school').set(cfg);head();m.textContent='Gespeichert.'}catch(e){m.textContent='Speichern nicht erlaubt.'}}
+async function uploadLogo(){const m=document.getElementById('am'),f=document.getElementById('al').files[0];if(!f)return;try{const as=await claude.use('assets'),r=await as.upload(f);await saveCfg({logo:r.url})}catch(e){m.textContent='Upload nicht möglich.'}}
+applySet();draw();
+(async()=>{try{const u=await claude.use('user');isAdmin=!!(u&&u.canEdit());db=await claude.use('db');const u2=await claude.use('user');me=u2&&u2.id?u2.id():null;
+if(db){try{const a=await db.doc('config/admin').get(),ad=typeof a.data==='function'?a.data():a.data;apw=ad&&ad.h||null}catch(e){}
+try{const rl=JSON.parse(localStorage.getItem('planer_login')||'null');if(rl){const a=await db.doc('accounts/'+rl.u).get();if(a.exists&&a.data().h===rl.h)await enter(rl.u,rl.h)}}catch(e){}if(!cur)draw()}if(db)db.doc('config/school').onSnapshot(s=>{const d=typeof s.data==='function'?s.data():s.data;if(d){cfg={name:d.name||'',logo:d.logo||''};head()}},()=>{});nav()}catch(e){}})();
+</script>
 </body>
 </html>
