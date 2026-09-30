@@ -65,6 +65,13 @@ button[data-sd]{padding:.05rem .4rem;font-size:.8em}
 <nav id="nav"></nav>
 <main id="main"></main>
 <script>
+const API_URL='https://workers.dev';
+let auth=null;try{auth=JSON.parse(localStorage.getItem('planer_auth')||'null')}catch(e){}
+const API=()=>String((auth&&auth.api)||localStorage.getItem('planer_api')||API_URL).replace(/\/$/,'');
+async function api(path,opt={}){const r=await fetch(API()+path,{...opt,headers:{'Content-Type':'application/json',...(auth?{Authorization:'Bearer '+auth.token}:{})}});const j=await r.json().catch(()=>({}));if(!r.ok)throw Object.assign(new Error(j.error||'Fehler '+r.status),{status:r.status});return j}
+async function pull(){if(!auth)return'none';const j=await api('/data');if(j.data&&(j.ts||0)>(S.ts||0)){S=Object.assign(DEF(),j.data);S.ts=j.ts;try{localStorage.setItem('planer_v2',JSON.stringify(S))}catch(e){}dirty=false;applySet();banner();draw();return'pulled'}return'same'}
+const push=()=>api('/data',{method:'PUT',body:JSON.stringify({data:S,ts:S.ts})});
+function logout(){auth=null;try{localStorage.removeItem('planer_auth')}catch(e){}draw()}
 const DAYS=['Mo','Di','Mi','Do','Fr'],PER=10,COL=['#4f6bff','#22a06b','#f08a24','#e0407a','#8b5cf6','#0ea5e9','#e5484d','#14b8a6','#eab308','#64748b'];
 const DEF=()=>({name:'Schulplaner',subjects:[],tt:{},off:{},times:{},tasks:[],exams:[],set:{theme:'auto',size:'1',ac:'#4f6bff',start:'tt',cm:'status',cf:'#e5484d',cb:'#22a06b'}});
 let S=DEF(),tab='tt',dirty=false;
@@ -75,7 +82,9 @@ const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&g
 const uid=()=>Math.random().toString(36).slice(2,9);
 function mark(){dirty=true;banner()}
 function banner(){$('dirty').innerHTML=dirty?'<span>Ungespeicherte Änderungen. Bitte speichern!</span><button id="sv2">Speichern</button>':'';$('dirty').hidden=!dirty;if($('sv2'))$('sv2').onclick=doSave}
-function doSave(){try{localStorage.setItem('planer_v2',JSON.stringify(S));dirty=false;banner();const m=$('svm');if(m)m.textContent='Gespeichert um '+new Date().toLocaleTimeString('de-DE')+' Uhr.'}catch(e){const m=$('svm');if(m)m.textContent='Speichern nicht möglich (Browser blockiert Speicher). Nutze die Sicherungsdatei.';else alert('Speichern nicht möglich.')}}
+async function doSave(){S.ts=Date.now();const say=t=>{const m=$('svm');if(m)m.textContent=t},tm=()=>new Date().toLocaleTimeString('de-DE');
+try{localStorage.setItem('planer_v2',JSON.stringify(S));dirty=false;banner();say('Gespeichert um '+tm()+' Uhr.')}catch(e){say('Speichern im Browser nicht möglich. Nutze die Sicherungsdatei.')}
+if(auth){try{await push();say('Gespeichert und mit deinem Konto synchronisiert ('+tm()+' Uhr).')}catch(e){say('Lokal gespeichert, aber die Synchronisierung ist fehlgeschlagen: '+e.message);if(e.status===401)logout()}}}
 function applySet(){const r=document.documentElement,t=S.set.theme;t==='auto'?r.removeAttribute('data-theme'):r.setAttribute('data-theme',t);r.style.fontSize=({'0.875':'14px','1':'16px','1.25':'20px'})[S.set.size]||'16px';r.style.setProperty('--ac',S.set.ac);$('sname').textContent=S.name||'Schulplaner';document.title=S.name||'Schulplaner';$('sub').textContent=new Date().toLocaleDateString('de-DE',{weekday:'long',day:'numeric',month:'long'})}
 const DEFSUB=['Deutsch','Mathe','Englisch','Biologie','Chemie','Physik','Geschichte','Erdkunde','Politik','Sport','Kunst','Musik','Religion','Ethik','Informatik','Französisch','Spanisch','Latein'];
 const subOf=v=>String(v||'').split(' · ')[0].trim(),roomOf=v=>String(v||'').split(' · ').slice(1).join(' · ');
@@ -97,15 +106,23 @@ return `<div class="card"><h2>Speichern</h2><div class="msg"><b>Wichtig:</b> Das
 <div class="card"><h2>Einstellungen</h2><label class="s">Name der App<input id="nm" value="${esc(S.name)}" placeholder="z. B. Lernzeitplaner"></label><label class="s">Darstellung<select id="th">${o('auto',S.set.theme,'Automatisch')}${o('light',S.set.theme,'Hell')}${o('dark',S.set.theme,'Dunkel')}</select></label><label class="s">Schriftgröße<select id="sz">${o('0.875',S.set.size,'Klein')}${o('1',S.set.size,'Normal')}${o('1.25',S.set.size,'Groß')}</select></label><label class="s">Startseite<select id="stt">${o('tt',S.set.start,'Stundenplan')}${o('hw',S.set.start,'Lernzeit')}${o('ex',S.set.start,'Klausuren')}</select></label>
 <label class="s">Stunden einfärben<select id="cm">${o('status',S.set.cm,'Rot = frei, Grün = belegt')}${o('subject',S.set.cm,'Nach Fach')}${o('off',S.set.cm,'Aus')}</select></label><label class="s">Farbe für „frei"<input type="color" id="cf" value="${S.set.cf}" style="width:3rem;padding:0"></label><label class="s">Farbe für „belegt"<input type="color" id="cb" value="${S.set.cb}" style="width:3rem;padding:0"></label>
 <div class="s" style="display:block">Design-Farbe<div class="row" style="margin-top:.5rem">${COL.map(c=>`<button class="sw ${S.set.ac===c?'on':''}" data-k="${c}" style="background:${c}"></button>`).join('')}<input type="color" id="kc" value="${S.set.ac}" style="padding:0;width:2.6rem;height:2.2rem;flex:0"></div></div></div>
-${vSub()}${vGrid()}<div class="card"><h2>Sicherungsdatei</h2><div class="row"><button class="b" id="bx">Datei speichern</button><input type="file" id="bi" accept=".json"><button class="b g" id="bib">Datei laden</button></div><div class="msg" id="sm">Lege die Datei z. B. in iCloud Drive ab.</div></div>`}
+${vAcc()}${vSub()}${vGrid()}<div class="card"><h2>Sicherungsdatei</h2><div class="row"><button class="b" id="bx">Datei speichern</button><input type="file" id="bi" accept=".json"><button class="b g" id="bib">Datei laden</button></div><div class="msg" id="sm">Lege die Datei z. B. in iCloud Drive ab.</div></div>`}
 const tint=v=>{const sj=String(v||'').split(' · ')[0].trim();if(!sj)return'';let h=0;for(const c of sj.toLowerCase())h=(h*31+c.charCodeAt(0))%360;return `background:color-mix(in srgb,hsl(${h} 70% 55%) 24%,var(--card));border-color:hsl(${h} 60% 55% / .5);font-weight:600`};
 const cs=(v,off)=>{const m=S.set.cm;if(off)return m==='status'?`background:color-mix(in srgb,${S.set.cf} 22%,transparent);color:${S.set.cf}`:'background:var(--bg);color:var(--mut)';if(m==='status'&&subOf(v))return `background:color-mix(in srgb,${S.set.cb} 22%,var(--card));border-color:color-mix(in srgb,${S.set.cb} 55%,transparent)`;return m==='subject'?tint(v):''};
+function vAcc(){if(auth)return `<div class="card"><h2>Konto</h2><div class="msg">Angemeldet als <b>${esc(auth.email)}</b>. Beim Speichern werden deine Daten automatisch mit allen Geräten synchronisiert.</div><div class="row"><button class="b" id="sy">Jetzt synchronisieren</button><button class="b g" id="lo">Abmelden</button></div><div class="msg" id="am"></div></div>`;
+return `<div class="card"><h2>Konto und Synchronisierung</h2><div class="msg">Melde dich an, damit deine Daten auf allen Geräten gleich sind. Ohne Konto bleiben sie nur in diesem Browser.</div>${API_URL?'':`<div class="row"><input id="au" placeholder="Server-Adresse (https://….workers.dev)" value="${esc(localStorage.getItem('planer_api')||'')}"></div>`}<div class="row"><input id="ae" type="email" placeholder="E-Mail" autocomplete="username"><input id="ap" type="password" placeholder="Passwort (mind. 8 Zeichen)" autocomplete="current-password"></div><div class="row"><button class="b" id="li">Anmelden</button><button class="b g" id="re">Registrieren</button></div><div class="msg" id="am"></div></div>`}
+async function authGo(mode){const m=$('am'),u=$('au');if(u){const v=u.value.trim().replace(/\/$/,'');if(!/^https:\/\//.test(v)){m.textContent='Bitte die Worker-Adresse mit https:// eintragen.';return}localStorage.setItem('planer_api',v)}
+m.textContent='Bitte warten …';try{const r=await api('/'+mode,{method:'POST',body:JSON.stringify({email:$('ae').value.trim().toLowerCase(),password:$('ap').value})});auth={api:API(),email:$('ae').value.trim().toLowerCase(),token:r.token};localStorage.setItem('planer_auth',JSON.stringify(auth));if(await pull()==='same')await push().catch(()=>{});draw()}catch(e){m.textContent=e.status?e.message:'Server nicht erreichbar. Prüfe die Adresse.'}}
 function vSub(){return `<div class="card"><h2>Fächer</h2><div class="msg">Vorschläge wie Deutsch, Mathe, Englisch sind schon dabei. Eigene Fächer fügst du hier hinzu:</div><div class="row"><input id="sn" placeholder="Eigenes Fach"><button class="b" id="sa">Hinzufügen</button></div><div class="row">${S.subjects.map((x,i)=>`<span class="pill">${esc(x)} <button class="b g" data-sd="${i}">✕</button></span>`).join('')||'<span class="msg">Noch keine eigenen Fächer.</span>'}</div></div>`}
 const lastOn=i=>{let n=0;for(let p=1;p<=PER;p++)if(!S.off[i+'_'+p])n=p;return n};
 function vGrid(){let h=`<div class="card scroll"><h2>Stundenraster</h2><div class="msg">Trage Uhrzeiten ein und lege pro Tag fest, welche Stunden stattfinden. Abgewählte Stunden erscheinen im Stundenplan rot als „frei".</div><table><tr><th>Std.</th><th>Uhrzeit</th>${DAYS.map(d=>`<th>${d}</th>`).join('')}<th></th></tr><tr><td></td><td class="msg">Stunden pro Tag</td>${DAYS.map((d,i)=>`<td><select data-n="${i}" style="width:100%">${Array.from({length:PER+1},(_,n)=>`<option value="${n}" ${lastOn(i)===n?'selected':''}>${n}</option>`).join('')}</select></td>`).join('')}<td></td></tr>`;
 for(let p=1;p<=PER;p++){const gone=DAYS.every((d,i)=>S.off[i+'_'+p]);h+=`<tr class="${gone?'gone':''}"><td class="n"><b>${p}</b></td><td><input data-tm="${p}" value="${esc(S.times[p])}" placeholder="08:00–08:45" style="min-width:7.5rem"></td>`+DAYS.map((d,i)=>`<td style="text-align:center"><input type="checkbox" data-o="${i}_${p}" ${S.off[i+'_'+p]?'':'checked'}></td>`).join('')+`<td>${gone?`<button class="b" data-rs="${p}" title="Stunde wiederherstellen">↺</button>`:`<button class="b g" data-rm="${p}" title="Stunde entfernen">✕</button>`}</td></tr>`}
 return h+'</table></div>'}
 function bind(){
+if($('li'))$('li').onclick=()=>authGo('login');
+if($('re'))$('re').onclick=()=>authGo('register');
+if($('lo'))$('lo').onclick=logout;
+if($('sy'))$('sy').onclick=async()=>{const m=$('am');m.textContent='…';try{if(await pull()==='same')await push();$('am').textContent='Synchronisiert.'}catch(e){m.textContent='Fehler: '+e.message}};
 document.querySelectorAll('[data-rm]').forEach(b=>b.onclick=()=>{DAYS.forEach((d,i)=>S.off[i+'_'+b.dataset.rm]=1);mark();draw()});
 document.querySelectorAll('[data-rs]').forEach(b=>b.onclick=()=>{DAYS.forEach((d,i)=>delete S.off[i+'_'+b.dataset.rs]);mark();draw()});
 document.querySelectorAll('[data-tm]').forEach(i=>i.oninput=()=>{S.times[i.dataset.tm]=i.value;mark()});
@@ -139,6 +156,8 @@ const ts=[...new Set(rows.map(r=>r.t))].sort((a,b)=>a-b);return rows.map(r=>({d:
 function fill(cells){let n=0;cells.forEach(c=>{const d=+c.d,p=+c.p;if(d>=0&&d<5&&p>=1&&p<=PER&&c.s){S.tt[d+'_'+p]=c.s+(c.r?' · '+c.r:'');delete S.off[d+'_'+p];n++}});return n}
 async function doImport(){const m=$('impm'),f=$('imp').files[0];if(!f){m.textContent='Bitte zuerst eine .ics-Datei wählen.';return}try{const n=fill(parseIcs(await f.text()));if(!n){m.textContent='Keine Termine gefunden.';return}mark();draw();$('impm').textContent=n+' Stunden übernommen. Bitte prüfen und speichern.'}catch(e){m.textContent='Datei nicht lesbar.'}}
 applySet();draw();
+if(auth)pull().catch(()=>{});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&auth&&!dirty)pull().catch(()=>{})});
 </script>
 </body>
 </html>
